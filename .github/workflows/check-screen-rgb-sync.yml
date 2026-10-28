@@ -1,0 +1,20 @@
+name: Check optional screen RGB helper
+on:
+  push:
+    branches: [main, community-rgb]
+    paths: ['macOS/ScreenRGBSync.swift', 'macOS/install-screen-rgb-*.sh', 'tests/test_screen_rgb_sync.py', '.github/workflows/check-screen-rgb-sync.yml']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile helper
+        run: xcrun swiftc -O -framework AppKit -framework CoreGraphics -framework IOKit macOS/ScreenRGBSync.swift -o /tmp/ScreenRGBSync
+      - name: Check installers
+        run: bash -n macOS/install-screen-rgb-sync.sh && bash -n macOS/install-screen-rgb-daemon.sh
+      - name: Check wake policy
+        run: python3 tests/test_screen_rgb_sync.py
