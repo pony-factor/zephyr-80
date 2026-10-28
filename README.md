@@ -16,4 +16,17 @@ The helper sends Compose as the protocol marker, Kana for display awake, Num Loc
 
 The installer uses separate `Glove80 Mac` support/log directories and `io.github.JFWooten4.glove80-mac` service labels. It does not replace an older installation; disable any previous screen-sync service before installing this one so two helpers do not send conflicting reports.
 
-Community RGB firmware is being migrated separately.
+Two independent firmware profiles live under `config/`. The `stock` profile uses pinned MoErgo firmware and its built-in keymap. The `community-rgb` profile uses the pinned community RGB fork, an unchanged upstream keymap, and a neutral per-key map with all cells unlit. Lighting starts off in both profiles. No custom effects or firmware patches are applied.
+
+The `community-rgb` branch provides the same clean starting point without importing history from another configuration. The firmware workflow builds both profiles for both halves. Download the two artifacts for the same profile and run, then copy their UF2 files and matching `build-status.json` into `firmware/`. The app checks build metadata against the checkout when it is present. These profiles do not include the optional screen-sync firmware protocol.
+
+For local builds, copy the selected profile to a separate workspace as `config/`, then run `west init -l config`, `west update`, `west zephyr-export`, and `west build -s zmk/app -b glove80_lh -- -DZMK_CONFIG=<absolute-config-directory>`. Build the right half in another build directory using `-d build-rh -b glove80_rh`.
+
+For per-key colors, edit the `&ug 0x000000` cells in the community profile. Each cell corresponds to the same position in the stock keymap. Add maps with other `layer-id` values as needed; cycle to the fork's layer indicator effect and enable RGB using the existing stock RGB controls. Runtime RGB settings persist across flashes. Firmware compilation and actual LED behavior must be verified before relying on a modified map.
+
+Upstream firmware and keymap sources:
+
+- https://github.com/moergo-sc/zmk/tree/ce69e85f585c724142aae37ddf8a7e019ff19e93
+- https://github.com/darknao/zmk/tree/8aeaaa66fbb4b94948c8763e06f1920ab0b69480
+
+The community keymap retains its upstream copyright and MIT license notice.

@@ -1,0 +1,63 @@
+name: Build stock and community RGB firmware
+on:
+  push:
+    branches: [main, community-rgb]
+    paths: ['config/**', '.github/workflows/build-firmware.yml']
+  pull_request:
+    paths: ['config/**', '.github/workflows/build-firmware.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: zmkfirmware/zmk-build-arm:stable
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [stock, community-rgb]
+        board: [glove80_lh, glove80_rh]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select firmware profile
+        env:
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          mkdir -p /tmp/glove80-build
+          cp -R "config/$PROFILE" /tmp/glove80-build/config
+      - name: Initialize firmware workspace
+        working-directory: /tmp/glove80-build
+        run: west init -l config
+      - name: Fetch dependencies
+        working-directory: /tmp/glove80-build
+        run: west update --fetch-opt=--filter=tree:0
+      - name: Export Zephyr environment
+        working-directory: /tmp/glove80-build
+        run: west zephyr-export
+      - name: Build half
+        working-directory: /tmp/glove80-build
+        env:
+          BOARD: ${{ matrix.board }}
+        run: west build -s zmk/app -d build -b "$BOARD" -- -DZMK_CONFIG=/tmp/glove80-build/config
+      - name: Collect firmware and provenance
+        env:
+          BOARD: ${{ matrix.board }}
+          SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          mkdir artifacts
+          cp /tmp/glove80-build/build/zephyr/zmk.uf2 "artifacts/$BOARD-zmk.uf2"
+          python3 - <<'PYTHON'
+          import json, os
+          from pathlib import Path
+          Path('artifacts/build-status.json').write_text(json.dumps({
+              'status': 'success', 'source_commit': os.environ['SOURCE_COMMIT'],
+              'run_url': os.environ['RUN_URL']
+          }, indent=2) + '\n')
+          PYTHON
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.profile }}-${{ matrix.board }}
+          path: artifacts/
+          if-no-files-found: error

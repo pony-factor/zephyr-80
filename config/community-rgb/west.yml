@@ -1,0 +1,11 @@
+manifest:
+  remotes:
+    - name: darknao
+      url-base: https://github.com/darknao
+  projects:
+    - name: zmk
+      remote: darknao
+      revision: 8aeaaa66fbb4b94948c8763e06f1920ab0b69480
+      import: app/west.yml
+  self:
+    path: config
