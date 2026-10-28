@@ -2,9 +2,9 @@ name: Build Glove80 Mac
 on:
   push:
     branches: [main, community-rgb]
-    paths: ['macOS/**', 'scripts/build-user-config.sh', 'tests/test_zmk_config_importer.swift', '.github/workflows/build-macos-app.yml']
+    paths: ['macOS/**', 'firmware/factory/**', 'scripts/build-user-config.sh', 'tests/test_zmk_config_importer.swift', '.github/workflows/build-macos-app.yml']
   pull_request:
-    paths: ['macOS/**', 'scripts/build-user-config.sh', 'tests/test_zmk_config_importer.swift', '.github/workflows/build-macos-app.yml']
+    paths: ['macOS/**', 'firmware/factory/**', 'scripts/build-user-config.sh', 'tests/test_zmk_config_importer.swift', '.github/workflows/build-macos-app.yml']
   workflow_dispatch:
 permissions:
   contents: read

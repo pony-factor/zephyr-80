@@ -6,6 +6,13 @@ WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+# Verify and bundle the fixed factory pair; user firmware stays outside the app.
+FACTORY_SOURCE="$SCRIPT_DIR/../firmware/factory"
+(cd "$FACTORY_SOURCE" && shasum -a 256 -c SHA256SUMS)
+mkdir -p "$APP/Contents/Resources/FactoryFirmware"
+cp "$FACTORY_SOURCE/glove80_lh-zmk.uf2" "$FACTORY_SOURCE/glove80_rh-zmk.uf2" \
+  "$FACTORY_SOURCE/glove80.keymap" "$FACTORY_SOURCE/README.md" "$FACTORY_SOURCE/SHA256SUMS" \
+  "$APP/Contents/Resources/FactoryFirmware/"
 for arch in arm64 x86_64; do
   xcrun swiftc -target "$arch-apple-macos13.0" -sdk "$SDK" -framework AppKit \
     "$SCRIPT_DIR/Glove80Flasher.swift" "$SCRIPT_DIR/ChargeGuardSettings.swift" "$SCRIPT_DIR/ZMKConfigImporter.swift" \

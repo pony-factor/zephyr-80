@@ -4,4 +4,6 @@ macOS/AppIcon.iconset/
 macOS/AppIcon.png
 firmware/*.uf2
 firmware/factory/*.uf2
+!firmware/factory/glove80_lh-zmk.uf2
+!firmware/factory/glove80_rh-zmk.uf2
 user-config/

@@ -714,10 +714,12 @@ final class FlasherController: NSObject, NSApplicationDelegate {
             return
         }
 
-        let factoryRoot = repoRoot.appendingPathComponent("firmware/factory")
+        let bundledFactory = appBundleURL()?.appendingPathComponent("Contents/Resources/FactoryFirmware")
+        let factoryRoot = bundledFactory.flatMap { firmwarePairExists(in: $0) ? $0 : nil }
+            ?? repoRoot.appendingPathComponent("firmware/factory")
         guard firmwarePairExists(in: factoryRoot) else {
             statusLabel.textColor = .systemRed
-            statusLabel.stringValue = "The repository's static factory firmware pair is unavailable."
+            statusLabel.stringValue = "The bundled factory firmware pair is unavailable. Rebuild the app from this checkout."
             return
         }
 
