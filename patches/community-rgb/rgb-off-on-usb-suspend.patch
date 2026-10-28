@@ -1,0 +1,102 @@
+diff --git a/app/Kconfig b/app/Kconfig
+--- a/app/Kconfig
++++ b/app/Kconfig
+@@ -345,6 +345,10 @@
+     bool "Turn off RGB underglow when USB is disconnected"
+     depends on USB_DEVICE_STACK
+ 
++config ZMK_RGB_UNDERGLOW_AUTO_OFF_USB_SUSPEND
++    bool "Turn off RGB underglow when USB is suspended"
++    depends on USB_DEVICE_STACK
++
+ config EXPERIMENTAL_RGB_LAYER
+     bool "Experimental per-key per-layer RGB underglow"
+     default n
+diff --git a/app/src/rgb_underglow.c b/app/src/rgb_underglow.c
+--- a/app/src/rgb_underglow.c
++++ b/app/src/rgb_underglow.c
+@@ -914,7 +914,8 @@
+ }
+ 
+ #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_IDLE) ||                                          \
+-    IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB) || IS_ENABLED(UNDERGLOW_LAYER_ENABLED)
++    IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB) ||                                          \
++    IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB_SUSPEND) || IS_ENABLED(UNDERGLOW_LAYER_ENABLED)
+ struct rgb_underglow_sleep_state {
+     bool is_awake;
+     bool rgb_state_before_sleeping;
+@@ -950,11 +951,25 @@
+     }
+ }
+ 
++static bool rgb_underglow_should_be_awake(void) {
++    bool should_be_awake = true;
++#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_IDLE)
++    should_be_awake = should_be_awake && zmk_activity_get_state() == ZMK_ACTIVITY_ACTIVE;
++#endif
++#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB)
++    should_be_awake = should_be_awake && zmk_usb_is_powered();
++#endif
++#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB_SUSPEND)
++    should_be_awake = should_be_awake && zmk_usb_get_status() != USB_DC_SUSPEND;
++#endif
++    return should_be_awake;
++}
++
+ static int rgb_underglow_event_listener(const zmk_event_t *eh) {
+ 
+ #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_IDLE)
+     if (as_zmk_activity_state_changed(eh)) {
+-        return rgb_underglow_auto_state(zmk_activity_get_state() == ZMK_ACTIVITY_ACTIVE);
++        return rgb_underglow_auto_state(rgb_underglow_should_be_awake());
+     }
+ #endif
+ 
+@@ -968,23 +983,26 @@
+ #endif
+         uint8_t layer = rgb_underglow_top_layer();
+         LOG_DBG("top layer: %d", layer);
+-        zmk_rgb_underglow_set_layer(layer, true);
++        if (rgb_underglow_should_be_awake()) {
++            zmk_rgb_underglow_set_layer(layer, true);
++        }
+         return 0;
+     }
+     if (as_zmk_underglow_color_changed(eh)) {
+         const struct zmk_underglow_color_changed *ev = as_zmk_underglow_color_changed(eh);
+         uint8_t layer = rgb_underglow_top_layer();
+         LOG_DBG("refresh layers %d, current: %d, wakeup: %d", ev->layers, layer, ev->wakeup);
+-        if ((ev->layers & (BIT(layer))) == BIT(layer)) {
++        if (rgb_underglow_should_be_awake() && (ev->layers & (BIT(layer))) == BIT(layer)) {
+             zmk_rgb_underglow_set_layer(rgb_underglow_top_layer(), ev->wakeup);
+         }
+         return 0;
+     }
+ #endif /* UNDERGLOW_LAYER_ENABLED */
+ 
+-#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB)
++#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB) ||                                          \
++    IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB_SUSPEND)
+     if (as_zmk_usb_conn_state_changed(eh)) {
+-        return rgb_underglow_auto_state(zmk_usb_is_powered());
++        return rgb_underglow_auto_state(rgb_underglow_should_be_awake());
+     }
+ #endif
+ 
+@@ -994,13 +1012,15 @@
+ ZMK_LISTENER(rgb_underglow, rgb_underglow_event_listener);
+ #endif // IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_IDLE) ||
+        // IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB) ||
++       // IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB_SUSPEND) ||
+        // IS_ENABLED(UNDERGLOW_LAYER_ENABLED)
+ 
+ #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_IDLE)
+ ZMK_SUBSCRIPTION(rgb_underglow, zmk_activity_state_changed);
+ #endif
+ 
+-#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB)
++#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB) ||                                          \
++    IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB_SUSPEND)
+ ZMK_SUBSCRIPTION(rgb_underglow, zmk_usb_conn_state_changed);
+ #endif
+ 

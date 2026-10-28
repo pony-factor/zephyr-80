@@ -1,0 +1,162 @@
+diff --git a/app/Kconfig b/app/Kconfig
+--- a/app/Kconfig
++++ b/app/Kconfig
+@@ -349,6 +349,16 @@
+     bool "Turn off RGB underglow when USB is suspended"
+     depends on USB_DEVICE_STACK
+ 
++config ZMK_RGB_UNDERGLOW_FADE_OFF
++    bool "Fade RGB underglow when turning off"
++    default n
++
++config ZMK_RGB_UNDERGLOW_FADE_OFF_MS
++    int "RGB underglow fade-out duration in milliseconds"
++    default 1500
++    range 25 10000
++    depends on ZMK_RGB_UNDERGLOW_FADE_OFF
++
+ config EXPERIMENTAL_RGB_LAYER
+     bool "Experimental per-key per-layer RGB underglow"
+     default n
+diff --git a/app/src/rgb_underglow.c b/app/src/rgb_underglow.c
+--- a/app/src/rgb_underglow.c
++++ b/app/src/rgb_underglow.c
+@@ -99,6 +99,13 @@
+ static struct led_rgb status_pixels[STRIP_NUM_PIXELS];
+ 
+ static struct rgb_underglow_state state;
++
++#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_FADE_OFF)
++#define UNDERGLOW_FADE_FRAME_MS 25
++static bool underglow_fade_active;
++static uint32_t underglow_fade_elapsed_ms;
++static struct led_rgb underglow_fade_start_pixels[STRIP_NUM_PIXELS];
++#endif
+ 
+ #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_EXT_POWER)
+ static const struct device *const ext_power = DEVICE_DT_GET(DT_INST(0, zmk_ext_power_generic));
+@@ -606,6 +613,9 @@
+         c_power = 0;
+     }
+     int desired_state = state.on || state.status_active;
++#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_FADE_OFF)
++    desired_state = desired_state || underglow_fade_active;
++#endif
+ 
+ #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+     // force power off, when battery low (<10%)
+@@ -630,6 +640,56 @@
+ #endif // CONFIG_ZMK_RGB_UNDERGLOW_EXT_POWER
+ }
+ 
++#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_FADE_OFF)
++static void zmk_rgb_underglow_finish_off(void) {
++    memset(pixels, 0, sizeof(pixels));
++    zmk_led_write_pixels();
++    underglow_fade_active = false;
++    zmk_rgb_set_ext_power();
++}
++
++static void zmk_rgb_underglow_fade_off_handler(struct k_work *work);
++K_WORK_DELAYABLE_DEFINE(underglow_fade_work, zmk_rgb_underglow_fade_off_handler);
++
++static void zmk_rgb_underglow_fade_off_handler(struct k_work *work) {
++    if (!underglow_fade_active) {
++        return;
++    }
++
++    const uint32_t duration = CONFIG_ZMK_RGB_UNDERGLOW_FADE_OFF_MS;
++    underglow_fade_elapsed_ms =
++        MIN(underglow_fade_elapsed_ms + UNDERGLOW_FADE_FRAME_MS, duration);
++    const uint32_t remaining = duration - underglow_fade_elapsed_ms;
++
++    for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
++        pixels[i].r = ((uint32_t)underglow_fade_start_pixels[i].r * remaining) / duration;
++        pixels[i].g = ((uint32_t)underglow_fade_start_pixels[i].g * remaining) / duration;
++        pixels[i].b = ((uint32_t)underglow_fade_start_pixels[i].b * remaining) / duration;
++    }
++
++    zmk_led_write_pixels();
++
++    if (remaining == 0) {
++        underglow_fade_active = false;
++        zmk_rgb_set_ext_power();
++        return;
++    }
++
++    const int ret = k_work_reschedule_for_queue(
++        zmk_workqueue_lowprio_work_q(), &underglow_fade_work, K_MSEC(UNDERGLOW_FADE_FRAME_MS));
++    if (ret < 0) {
++        zmk_rgb_underglow_finish_off();
++    }
++}
++#else
++static void zmk_rgb_underglow_off_handler(struct k_work *work) {
++    memset(pixels, 0, sizeof(pixels));
++    zmk_led_write_pixels();
++}
++
++K_WORK_DEFINE(underglow_off_work, zmk_rgb_underglow_off_handler);
++#endif
++
+ int zmk_rgb_underglow_on(void) {
+     zmk_rgb_underglow_transient_on();
+ #if IS_ENABLED(UNDERGLOW_LAYER_ENABLED)
+@@ -644,6 +704,11 @@
+     if (!led_strip)
+         return -ENODEV;
+ 
++#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_FADE_OFF)
++    k_work_cancel_delayable(&underglow_fade_work);
++    underglow_fade_active = false;
++#endif
++
+     state.on = true;
+     zmk_rgb_set_ext_power();
+ 
+@@ -652,15 +717,6 @@
+ 
+     return 0;
+ }
+-
+-static void zmk_rgb_underglow_off_handler(struct k_work *work) {
+-    for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
+-        pixels[i] = (struct led_rgb){r : 0, g : 0, b : 0};
+-    }
+-    zmk_led_write_pixels();
+-}
+-
+-K_WORK_DEFINE(underglow_off_work, zmk_rgb_underglow_off_handler);
+ 
+ int zmk_rgb_underglow_off(void) {
+     zmk_rgb_underglow_transient_off();
+@@ -672,11 +728,26 @@
+     if (!led_strip)
+         return -ENODEV;
+ 
++    k_timer_stop(&underglow_tick);
++
++#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_FADE_OFF)
++    memcpy(underglow_fade_start_pixels, pixels, sizeof(pixels));
++    underglow_fade_elapsed_ms = 0;
++    underglow_fade_active = true;
++#endif
++
++    state.on = false;
++
++#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_FADE_OFF)
++    const int ret = k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(),
++                                                &underglow_fade_work, K_NO_WAIT);
++    if (ret < 0) {
++        zmk_rgb_underglow_finish_off();
++    }
++#else
+     k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &underglow_off_work);
+-
+-    k_timer_stop(&underglow_tick);
+-    state.on = false;
+     zmk_rgb_set_ext_power();
++#endif
+ 
+     return 0;
+ }

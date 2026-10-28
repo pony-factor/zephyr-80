@@ -2,9 +2,9 @@ name: Build stock and community RGB firmware
 on:
   push:
     branches: [main, community-rgb]
-    paths: ['config/**', '.github/workflows/build-firmware.yml']
+    paths: ['config/**', 'patches/**', 'scripts/apply-rgb-patches.py', 'tests/test_rgb_patches.py', '.github/workflows/build-firmware.yml']
   pull_request:
-    paths: ['config/**', '.github/workflows/build-firmware.yml']
+    paths: ['config/**', 'patches/**', 'scripts/apply-rgb-patches.py', 'tests/test_rgb_patches.py', '.github/workflows/build-firmware.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -32,6 +32,10 @@ jobs:
       - name: Fetch dependencies
         working-directory: /tmp/glove80-build
         run: west update --fetch-opt=--filter=tree:0
+      - name: Apply shared RGB patches
+        run: python3 scripts/apply-rgb-patches.py /tmp/glove80-build/zmk
+      - name: Verify RGB power transitions
+        run: python3 tests/test_rgb_patches.py /tmp/glove80-build/zmk
       - name: Export Zephyr environment
         working-directory: /tmp/glove80-build
         run: west zephyr-export

@@ -22,11 +22,11 @@ The helper sends Compose as the protocol marker, Kana for display awake, Num Loc
 
 The installer uses separate `Glove80 Mac` support/log directories and `io.github.JFWooten4.glove80-mac` service labels. It does not replace an older installation; disable any previous screen-sync service before installing this one so two helpers do not send conflicting reports.
 
-Two independent firmware profiles live under `config/`. The `stock` profile uses pinned MoErgo firmware and its built-in keymap. The `community-rgb` profile uses the pinned community RGB fork, an unchanged upstream keymap, and a neutral per-key map with all cells unlit. Lighting starts off in both profiles. No custom effects or firmware patches are applied.
+Two independent firmware profiles live under `config/`. The `stock` profile uses pinned MoErgo firmware and its built-in keymap. The `community-rgb` profile uses the pinned community RGB fork, an unchanged upstream keymap, and a neutral per-key map with all cells unlit. Lighting starts off in both profiles. Both profiles apply the shared color-independent RGB patches described below. No custom color effects are included.
 
 The `community-rgb` branch provides the same clean starting point without importing history from another configuration. The firmware workflow builds both profiles for both halves. Download the two artifacts for the same profile and run, then copy their UF2 files and matching `build-status.json` into `firmware/`. The app checks build metadata against the checkout when it is present. These profiles do not include the optional screen-sync firmware protocol.
 
-For local builds, copy the selected profile to a separate workspace as `config/`, then run `west init -l config`, `west update`, `west zephyr-export`, and `west build -s zmk/app -b glove80_lh -- -DZMK_CONFIG=<absolute-config-directory>`. Build the right half in another build directory using `-d build-rh -b glove80_rh`.
+For local builds, copy the selected profile to a separate workspace as `config/`, then run `west init -l config`, `west update`, `python3 <glove80-mac-checkout>/scripts/apply-rgb-patches.py <workspace>/zmk`, `west zephyr-export`, and `west build -s zmk/app -b glove80_lh -- -DZMK_CONFIG=<absolute-config-directory>`. Build the right half in another build directory using `-d build-rh -b glove80_rh`.
 
 For per-key colors, edit the `&ug 0x000000` cells in the community profile. Each cell corresponds to the same position in the stock keymap. Add maps with other `layer-id` values as needed; cycle to the fork's layer indicator effect and enable RGB using the existing stock RGB controls. Runtime RGB settings persist across flashes. Firmware compilation and actual LED behavior must be verified before relying on a modified map.
 
@@ -36,3 +36,9 @@ Upstream firmware and keymap sources:
 - https://github.com/darknao/zmk/tree/8aeaaa66fbb4b94948c8763e06f1920ab0b69480
 
 The community keymap retains its upstream copyright and MIT license notice.
+
+The shared RGB patches preserve the selected color values and effect. Fade-off dims the current pixel buffer to black over 1.5 seconds, then releases LED power. It is enabled in both bundled build profiles; set `CONFIG_ZMK_RGB_UNDERGLOW_FADE_OFF=n` to disable it or change `CONFIG_ZMK_RGB_UNDERGLOW_FADE_OFF_MS` to adjust its duration.
+
+USB suspend auto-off is available but disabled by default. Set `CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB_SUSPEND=y` to opt in. It remembers the pre-suspend RGB state and restores it on resume, while respecting any enabled idle and USB-power gates. The community version retains per-layer RGB handling. USB suspend can happen during a screensaver, so leave this disabled when using the optional helper to follow actual display sleep. These patches do not add the helper's HID firmware protocol.
+
+The user-configuration builder applies these patches automatically for the two bundled pinned ZMK revisions. For another compatible upstream revision, opt in with `./scripts/build-user-config.sh <import-ID> --rgb-patches`. Patch compatibility is checked before changing upstream files, and repeated application is supported. The original custom color patch remains outside this repository.
