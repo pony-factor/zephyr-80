@@ -54,6 +54,8 @@ final class FlasherController: NSObject, NSApplicationDelegate {
     private var leftStatus: NSTextField!
     private var rightStatus: NSTextField!
     private var pullButton: NSButton!
+    private var importButton: NSButton!
+    private var useFirmwareButton: NSButton!
     private var restoreButton: NSButton!
     private var factoryButton: NSButton!
     private var chargeGuardButton: NSButton!
@@ -82,6 +84,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
 
         guard let repoRoot else {
             pullButton.isEnabled = false
+            importButton.isEnabled = false
             restoreButton.isEnabled = false
             factoryButton.isEnabled = false
             chargeGuardButton.isEnabled = false
@@ -141,7 +144,11 @@ final class FlasherController: NSObject, NSApplicationDelegate {
         chargeGuardButton.bezelStyle = .rounded
         chargeGuardButton.controlSize = .regular
 
-        let topButtons = NSStackView(views: [pullButton, chargeGuardButton])
+        importButton = NSButton(title: "Import ZMK…", target: self, action: #selector(importZMKConfiguration))
+        importButton.bezelStyle = .rounded
+        useFirmwareButton = NSButton(title: "Use Firmware…", target: self, action: #selector(useFirmwareFolder))
+        useFirmwareButton.bezelStyle = .rounded
+        let topButtons = NSStackView(views: [pullButton, importButton, useFirmwareButton, chargeGuardButton])
         topButtons.orientation = .horizontal
         topButtons.alignment = .centerY
         topButtons.spacing = 10
@@ -588,6 +595,64 @@ final class FlasherController: NSObject, NSApplicationDelegate {
             statusLabel.stringValue = "Firmware build status is unavailable. Checking automatically every 15 seconds…"
             startBuildRetrying()
         }
+    }
+
+    @objc private func importZMKConfiguration() {
+        guard let repoRoot else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Import a ZMK keymap or configuration folder"
+        panel.prompt = "Import"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        let profile = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26))
+        profile.addItems(withTitles: ["Default firmware: Stock", "Default firmware: Community RGB"])
+        panel.accessoryView = profile
+        panel.message = "Your original files stay in place. Firmware defaults apply only when west.yml or glove80.conf is missing."
+        guard panel.runModal() == .OK, let selection = panel.url else { return }
+        do {
+            let imported = try ZMKConfigImporter().importConfiguration(from: selection, into: repoRoot,
+                profile: profile.indexOfSelectedItem == 1 ? .communityRGB : .stock)
+            let alert = NSAlert()
+            alert.messageText = "ZMK configuration imported"
+            alert.informativeText = "Saved privately in user-config/\(imported.directory.lastPathComponent)/config.\n\nTo build both halves, run from this checkout:\n./scripts/build-user-config.sh \(imported.directory.lastPathComponent)\n\nThen choose Use Firmware… and select the import’s firmware folder."
+            alert.addButton(withTitle: "Show Configuration")
+            alert.addButton(withTitle: "Done")
+            if alert.runModal() == .alertFirstButtonReturn {
+                NSWorkspace.shared.activateFileViewerSelecting([imported.configDirectory])
+            }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Could not import configuration"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    @objc private func useFirmwareFolder() {
+        guard flashing.isEmpty, !pullInProgress else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Choose a matching Glove80 firmware pair"
+        panel.message = "Select a folder containing glove80_lh-zmk.uf2 and glove80_rh-zmk.uf2 from the same build."
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        guard firmwarePairExists(in: folder) else {
+            let alert = NSAlert()
+            alert.messageText = "Both firmware halves are required"
+            alert.informativeText = panel.message
+            alert.runModal()
+            return
+        }
+        stopBuildRetrying()
+        activeFirmwareRoot = folder
+        firmwareReady = true
+        resetFlashCycle()
+        commitLabel.stringValue = "User firmware selected\n\(folder.path)"
+        statusLabel.textColor = .labelColor
+        statusLabel.stringValue = "Firmware selected. Connect a half and enter its bootloader to flash."
+        startMonitoring()
     }
 
     @objc private func openChargeGuardSettings() {

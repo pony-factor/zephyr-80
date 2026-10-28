@@ -8,7 +8,7 @@ SDK="$(xcrun --sdk macosx --show-sdk-path)"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 for arch in arm64 x86_64; do
   xcrun swiftc -target "$arch-apple-macos13.0" -sdk "$SDK" -framework AppKit \
-    "$SCRIPT_DIR/Glove80Flasher.swift" "$SCRIPT_DIR/ChargeGuardSettings.swift" \
+    "$SCRIPT_DIR/Glove80Flasher.swift" "$SCRIPT_DIR/ChargeGuardSettings.swift" "$SCRIPT_DIR/ZMKConfigImporter.swift" \
     -o "$WORK_DIR/Glove80Flasher-$arch"
 done
 lipo -create "$WORK_DIR/Glove80Flasher-arm64" "$WORK_DIR/Glove80Flasher-x86_64" \

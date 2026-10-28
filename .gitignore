@@ -4,3 +4,4 @@ macOS/AppIcon.iconset/
 macOS/AppIcon.png
 firmware/*.uf2
 firmware/factory/*.uf2
+user-config/

@@ -2,9 +2,9 @@ name: Build Glove80 Mac
 on:
   push:
     branches: [main, community-rgb]
-    paths: ['macOS/**', '.github/workflows/build-macos-app.yml']
+    paths: ['macOS/**', 'scripts/build-user-config.sh', 'tests/test_zmk_config_importer.swift', '.github/workflows/build-macos-app.yml']
   pull_request:
-    paths: ['macOS/**', '.github/workflows/build-macos-app.yml']
+    paths: ['macOS/**', 'scripts/build-user-config.sh', 'tests/test_zmk_config_importer.swift', '.github/workflows/build-macos-app.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -17,6 +17,11 @@ jobs:
         run: ./macOS/build-app.sh
       - name: Compile charging helper
         run: xcrun swiftc -framework CoreBluetooth macOS/Glove80BatteryReader.swift macOS/Glove80ChargeGuard.swift -o /tmp/Glove80ChargeGuard
+      - name: Check configuration imports
+        run: |
+          xcrun swiftc macOS/ZMKConfigImporter.swift tests/test_zmk_config_importer.swift -o /tmp/ImportTests
+          /tmp/ImportTests
+          bash -n scripts/build-user-config.sh
       - name: Package app
         run: ditto -c -k --keepParent 'macOS/Glove80 Flasher.app' Glove80-Flasher.zip
       - uses: actions/upload-artifact@v4
