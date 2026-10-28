@@ -1,0 +1,6 @@
+.DS_Store
+macOS/*.app/
+macOS/AppIcon.iconset/
+macOS/AppIcon.png
+firmware/*.uf2
+firmware/factory/*.uf2

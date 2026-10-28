@@ -1,0 +1,25 @@
+name: Build Glove80 Mac
+on:
+  push:
+    branches: [main, community-rgb]
+    paths: ['macOS/**', '.github/workflows/build-macos-app.yml']
+  pull_request:
+    paths: ['macOS/**', '.github/workflows/build-macos-app.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build app
+        run: ./macOS/build-app.sh
+      - name: Compile charging helper
+        run: xcrun swiftc -framework CoreBluetooth macOS/Glove80BatteryReader.swift macOS/Glove80ChargeGuard.swift -o /tmp/Glove80ChargeGuard
+      - name: Package app
+        run: ditto -c -k --keepParent 'macOS/Glove80 Flasher.app' Glove80-Flasher.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Glove80-Flasher
+          path: Glove80-Flasher.zip
