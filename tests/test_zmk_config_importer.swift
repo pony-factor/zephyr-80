@@ -30,6 +30,10 @@ struct ImporterTests {
         try "user manifest".write(to: source.appendingPathComponent("west.yml"), atomically: true, encoding: .utf8)
         try "user settings".write(to: source.appendingPathComponent("glove80.conf"), atomically: true, encoding: .utf8)
         try "source".write(to: source.appendingPathComponent("src/module.c"), atomically: true, encoding: .utf8)
+        try fm.createDirectory(at: source.appendingPathComponent("zephyr"), withIntermediateDirectories: true)
+        try "name: user-module".write(to: source.appendingPathComponent("zephyr/module.yml"), atomically: true, encoding: .utf8)
+        try fm.createDirectory(at: source.appendingPathComponent("patches"), withIntermediateDirectories: true)
+        try "user patch".write(to: source.appendingPathComponent("patches/custom.patch"), atomically: true, encoding: .utf8)
         // Empty excluded fixtures contain no credentials.
         for name in [".env", "credentials.yml", "identity.pem"] {
             fm.createFile(atPath: source.appendingPathComponent(name).path, contents: Data())
@@ -38,7 +42,7 @@ struct ImporterTests {
         fm.createFile(atPath: source.appendingPathComponent("secrets/settings.yml").path, contents: Data())
         try fm.createSymbolicLink(at: source.appendingPathComponent("linked.keymap"), withDestinationURL: keymap)
         let folder = try importer.importConfiguration(from: source.deletingLastPathComponent(), into: repo, profile: .stock)
-        for (name, expected) in [("glove80.keymap", "original"), ("west.yml", "user manifest"), ("glove80.conf", "user settings"), ("src/module.c", "source")] {
+        for (name, expected) in [("glove80.keymap", "original"), ("west.yml", "user manifest"), ("glove80.conf", "user settings"), ("src/module.c", "source"), ("zephyr/module.yml", "name: user-module"), ("patches/custom.patch", "user patch")] {
             let contents = try String(contentsOf: folder.configDirectory.appendingPathComponent(name), encoding: .utf8)
             assert(contents == expected)
         }

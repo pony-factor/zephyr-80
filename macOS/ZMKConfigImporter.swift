@@ -25,7 +25,7 @@ struct ZMKConfigImporter {
 
     private let manager = FileManager.default
     private let ignoredDirectories: Set<String> = ["build", "node_modules", "zephyr", "zmk", "user-config"]
-    private let sourceExtensions: Set<String> = ["keymap", "conf", "dtsi", "dts", "overlay", "c", "h", "yaml", "yml"]
+    private let sourceExtensions: Set<String> = ["keymap", "conf", "dtsi", "dts", "overlay", "c", "h", "yaml", "yml", "patch"]
 
     // Inspect filenames and file types, then copy only configuration source.
     // Hidden files, symlinks, firmware binaries, and credential files are excluded.
@@ -80,7 +80,12 @@ struct ZMKConfigImporter {
                 let info = try item.resourceValues(forKeys: properties)
                 if info.isSymbolicLink == true { continue }
                 if info.isDirectory == true {
-                    if ignoredDirectories.contains(item.lastPathComponent) || excludedName(item) { enumerator.skipDescendants() }
+                    // The top-level zephyr/ folder contains the configuration's
+                    // module metadata; nested Zephyr dependency checkouts stay excluded.
+                    let isModuleMetadata = item.lastPathComponent == "zephyr" && enumerator.level == 1
+                    if (ignoredDirectories.contains(item.lastPathComponent) && !isModuleMetadata) || excludedName(item) {
+                        enumerator.skipDescendants()
+                    }
                     continue
                 }
                 guard info.isRegularFile == true, allowed(item) else { continue }
