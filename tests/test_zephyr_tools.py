@@ -49,7 +49,7 @@ class ToolSetupTests(unittest.TestCase):
              patch.object(tools, "command_available", return_value=True):
             state = tools.status(self.workspace)
         self.assertTrue(state["ready"])
-        self.assertEqual(state["sdk"], str(sdk))
+        self.assertEqual(state["sdk"], str(sdk.resolve()))
         self.assertEqual(state["missing"], [])
 
     def test_no_sdk_install_for_unsupported_zephyr(self):
