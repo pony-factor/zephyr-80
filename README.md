@@ -53,13 +53,17 @@ Each import creates a separate `user-config/<import-ID>/config/` directory ignor
 
 ### Build and flash
 
-Import checks file selection and keymap names; it does not validate ZMK syntax or firmware compatibility. After import, run the command shown by the app from this repository's root:
+Import checks file selection and keymap names, then automatically starts a local build of both firmware halves. The app stays responsive while dependencies download and compilation runs. The build requires an installed `west` command and a compatible Zephyr SDK/toolchain. The app searches its inherited PATH plus standard Homebrew and `~/.local/bin` locations for build tools.
+
+When both halves finish, choose **Use Firmware** to prepare flashing, or **Later** to keep the output for another time. A failed build preserves the imported configuration and offers **Show Build Log** when a log is available at `user-config/<import-ID>/build.log`. Resolve missing tools or compiler errors before flashing.
+
+To rerun a saved import from this repository's root:
 
 ```sh
 ./scripts/build-user-config.sh <import-ID>
 ```
 
-Replace `<import-ID>` with the generated ID shown by the app. The build requires an installed `west` command and a compatible Zephyr SDK/toolchain, fetches the imported manifest's dependencies, and compiles both halves. Importing alone does not build or flash anything. Resolve compiler errors before flashing.
+Replace `<import-ID>` with the directory name under `user-config/`.
 
 The builder applies the shared RGB patches automatically for the bundled pinned firmware revisions, as described below. Your imported `.patch` files are retained as source only and are not applied automatically. If your configuration needs them, prepare a manual build workspace, apply the shared RGB patches first and your patches afterward, then compile. The local build commands below show the manual workflow.
 

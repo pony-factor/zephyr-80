@@ -65,6 +65,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
     private var repoRoot: URL?
     private var activeFirmwareRoot: URL?
     private var firmwareReady = false
+    private var buildInProgress = false
     private var pullInProgress = false
     private var flashed: Set<Side> = []
     private var flashing: Set<Side> = []
@@ -610,7 +611,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
             update(.left, text: "Select firmware", color: .secondaryLabelColor)
             update(.right, text: "Select firmware", color: .secondaryLabelColor)
             statusLabel.textColor = .labelColor
-            statusLabel.stringValue = "Import ZMK… to prepare your configuration, build it locally, then choose Use Firmware… to select the output folder."
+            statusLabel.stringValue = "Import ZMK… to build your configuration automatically, or choose Use Firmware… to select an existing firmware pair."
 
         case .mismatch(let sourceCommit):
             firmwareReady = false
@@ -649,7 +650,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
     }
 
     @objc private func importZMKConfiguration() {
-        guard let repoRoot else { return }
+        guard let repoRoot, !buildInProgress, !pullInProgress, flashing.isEmpty else { return }
         let panel = NSOpenPanel()
         panel.title = "Import a ZMK keymap or configuration folder"
         panel.prompt = "Import"
@@ -664,14 +665,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
         do {
             let imported = try ZMKConfigImporter().importConfiguration(from: selection, into: repoRoot,
                 profile: profile.indexOfSelectedItem == 1 ? .communityRGB : .stock)
-            let alert = NSAlert()
-            alert.messageText = "ZMK configuration imported"
-            alert.informativeText = "Saved privately in user-config/\(imported.directory.lastPathComponent)/config.\n\nTo build both halves, run from this checkout:\n./scripts/build-user-config.sh \(imported.directory.lastPathComponent)\n\nThen choose Use Firmware… and select the import’s firmware folder."
-            alert.addButton(withTitle: "Show Configuration")
-            alert.addButton(withTitle: "Done")
-            if alert.runModal() == .alertFirstButtonReturn {
-                NSWorkspace.shared.activateFileViewerSelecting([imported.configDirectory])
-            }
+            buildImportedConfiguration(imported, in: repoRoot)
         } catch {
             let alert = NSAlert()
             alert.messageText = "Could not import configuration"
@@ -680,8 +674,96 @@ final class FlasherController: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func buildImportedConfiguration(_ imported: ZMKConfigImporter.ImportedConfiguration, in root: URL) {
+        buildInProgress = true
+        firmwareReady = false
+        stopMonitoring()
+        for button in [importButton, useFirmwareButton, pullButton, restoreButton, factoryButton] {
+            button?.isEnabled = false
+        }
+        commitLabel.textColor = .secondaryLabelColor
+        commitLabel.stringValue = "Building imported configuration\n\(imported.directory.lastPathComponent)"
+        update(.left, text: "Building", color: .secondaryLabelColor)
+        update(.right, text: "Building", color: .secondaryLabelColor)
+        statusLabel.textColor = .labelColor
+        statusLabel.stringValue = "Building both firmware halves locally. The first build downloads firmware dependencies and may take several minutes."
+
+        let logURL = imported.directory.appendingPathComponent("build.log")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var failure: String?
+            do {
+                var environment = ProcessInfo.processInfo.environment
+                let paths = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
+                    + ["/opt/homebrew/bin", "/usr/local/bin", NSHomeDirectory() + "/.local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+                environment["PATH"] = paths.joined(separator: ":")
+                guard paths.contains(where: {
+                    FileManager.default.isExecutableFile(atPath: URL(fileURLWithPath: $0).appendingPathComponent("west").path)
+                }) else {
+                    throw NSError(domain: "LocalFirmwareBuild", code: 1, userInfo: [
+                        NSLocalizedDescriptionKey: "Install west and a compatible Zephyr SDK/toolchain, then import the configuration again. Your imported files are saved in \(imported.configDirectory.path)."
+                    ])
+                }
+                guard FileManager.default.createFile(atPath: logURL.path, contents: nil) else {
+                    throw NSError(domain: "LocalFirmwareBuild", code: 2, userInfo: [NSLocalizedDescriptionKey: "Could not create the local build log."])
+                }
+                let log = try FileHandle(forWritingTo: logURL)
+                defer { try? log.close() }
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/bin/bash")
+                process.arguments = [root.appendingPathComponent("scripts/build-user-config.sh").path, imported.directory.lastPathComponent]
+                process.currentDirectoryURL = root
+                process.environment = environment
+                process.standardOutput = log
+                process.standardError = log
+                try process.run()
+                process.waitUntilExit()
+                if process.terminationStatus != 0 {
+                    failure = "The local firmware build failed (exit \(process.terminationStatus)). Open the build log for details. Your imported configuration is preserved."
+                }
+            } catch {
+                failure = error.localizedDescription
+            }
+            let buildFailure = failure
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.buildInProgress = false
+                for button in [self.importButton, self.useFirmwareButton, self.pullButton, self.restoreButton, self.factoryButton] {
+                    button?.isEnabled = true
+                }
+                let firmware = imported.directory.appendingPathComponent("firmware")
+                let alert = NSAlert()
+                if let message = buildFailure ?? (self.firmwarePairExists(in: firmware) ? nil : "The build did not produce both firmware halves.") {
+                    self.statusLabel.textColor = .systemRed
+                    self.statusLabel.stringValue = "Local build failed. Your configuration is saved; resolve the build error and import again, or build it from Terminal."
+                    self.update(.left, text: "Build failed", color: .systemRed)
+                    self.update(.right, text: "Build failed", color: .systemRed)
+                    alert.messageText = "Could not build firmware"
+                    alert.informativeText = message
+                    alert.addButton(withTitle: "OK")
+                    if self.fileManager.fileExists(atPath: logURL.path) {
+                        alert.addButton(withTitle: "Show Build Log")
+                    }
+                    if alert.runModal() == .alertSecondButtonReturn {
+                        NSWorkspace.shared.activateFileViewerSelecting([logURL])
+                    }
+                } else {
+                    self.statusLabel.stringValue = "Both halves built successfully. Choose Use Firmware to prepare flashing, or select the output later with Use Firmware…."
+                    self.update(.left, text: "Built", color: .systemGreen)
+                    self.update(.right, text: "Built", color: .systemGreen)
+                    alert.messageText = "Firmware built successfully"
+                    alert.informativeText = "Both halves are ready in \(firmware.path). Choose Use Firmware to enable bootloader detection and flashing."
+                    alert.addButton(withTitle: "Use Firmware")
+                    alert.addButton(withTitle: "Later")
+                    if alert.runModal() == .alertFirstButtonReturn {
+                        self.selectFirmwareFolder(firmware)
+                    }
+                }
+            }
+        }
+    }
+
     @objc private func useFirmwareFolder() {
-        guard flashing.isEmpty, !pullInProgress else { return }
+        guard flashing.isEmpty, !pullInProgress, !buildInProgress else { return }
         let panel = NSOpenPanel()
         panel.title = "Choose a matching Glove80 firmware pair"
         panel.message = "Select a folder containing glove80_lh-zmk.uf2 and glove80_rh-zmk.uf2 from the same build."
@@ -696,9 +778,14 @@ final class FlasherController: NSObject, NSApplicationDelegate {
             alert.runModal()
             return
         }
+        selectFirmwareFolder(folder)
+    }
+
+    private func selectFirmwareFolder(_ folder: URL) {
         activeFirmwareRoot = folder
         firmwareReady = true
         resetFlashCycle()
+        commitLabel.textColor = .secondaryLabelColor
         commitLabel.stringValue = "User firmware selected\n\(folder.path)"
         statusLabel.textColor = .labelColor
         statusLabel.stringValue = "Firmware selected. Connect a half and enter its bootloader to flash."
@@ -728,6 +815,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
 
     @objc private func restorePreviousFirmware() {
         guard let repoRoot else { return }
+        guard !buildInProgress else { return }
         guard flashing.isEmpty else {
             statusLabel.textColor = .systemOrange
             statusLabel.stringValue = "Wait for the current flash to finish before selecting recovery firmware."
@@ -757,6 +845,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
 
     @objc private func restoreFactoryFirmware() {
         guard let repoRoot else { return }
+        guard !buildInProgress else { return }
         guard flashing.isEmpty else {
             statusLabel.textColor = .systemOrange
             statusLabel.stringValue = "Wait for the current flash to finish before selecting factory firmware."
@@ -793,6 +882,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
             return
         }
 
+        guard !buildInProgress else { return }
         guard flashing.isEmpty else {
             statusLabel.stringValue = "Wait for the current flash to finish before pulling repository changes."
             statusLabel.textColor = .systemOrange
