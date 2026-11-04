@@ -291,6 +291,22 @@ final class FlasherController: NSObject, NSApplicationDelegate {
         card.layer?.cornerRadius = 12
         card.layer?.masksToBounds = true
 
+        if let image = glove80HalfImage(for: side) {
+            let imageView = NSImageView(image: image)
+            imageView.translatesAutoresizingMaskIntoConstraints = false
+            imageView.imageScaling = .scaleProportionallyUpOrDown
+            imageView.imageAlignment = .alignCenter
+            imageView.alphaValue = 0.18
+            card.addSubview(imageView)
+
+            NSLayoutConstraint.activate([
+                imageView.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 6),
+                imageView.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -6),
+                imageView.topAnchor.constraint(equalTo: card.topAnchor, constant: 6),
+                imageView.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -6)
+            ])
+        }
+
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .centerX
@@ -322,6 +338,44 @@ final class FlasherController: NSObject, NSApplicationDelegate {
         ])
 
         return (card, status)
+    }
+
+    private func glove80HalfImage(for side: Side) -> NSImage? {
+        guard let sourceURL = glove80ProductImageURL(),
+              let cleanedImage = NSImage(contentsOf: sourceURL) else {
+            return nil
+        }
+
+        let halfWidth = cleanedImage.size.width / 2
+        let sourceRect = NSRect(
+            x: side == .left ? 0 : halfWidth,
+            y: 0,
+            width: halfWidth,
+            height: cleanedImage.size.height
+        )
+
+        let result = NSImage(size: sourceRect.size)
+        result.lockFocus()
+        cleanedImage.draw(
+            in: NSRect(origin: .zero, size: sourceRect.size),
+            from: sourceRect,
+            operation: .sourceOver,
+            fraction: 1
+        )
+        result.unlockFocus()
+        return result
+    }
+
+    private func glove80ProductImageURL() -> URL? {
+        if let appURL = appBundleURL() {
+            let bundled = appURL
+                .appendingPathComponent("Contents/Resources/Glove80Pair.png")
+            if fileManager.fileExists(atPath: bundled.path) {
+                return bundled
+            }
+        }
+
+        return Bundle.main.url(forResource: "Glove80Pair", withExtension: "png")
     }
 
     private func label(_ text: String, size: CGFloat, weight: NSFont.Weight) -> NSTextField {

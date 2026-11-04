@@ -13,6 +13,7 @@ mkdir -p "$APP/Contents/Resources/FactoryFirmware"
 cp "$FACTORY_SOURCE/glove80_lh-zmk.uf2" "$FACTORY_SOURCE/glove80_rh-zmk.uf2" \
   "$FACTORY_SOURCE/glove80.keymap" "$FACTORY_SOURCE/README.md" "$FACTORY_SOURCE/SHA256SUMS" \
   "$APP/Contents/Resources/FactoryFirmware/"
+cp "$SCRIPT_DIR/Glove80Pair.png" "$APP/Contents/Resources/Glove80Pair.png"
 for arch in arm64 x86_64; do
   xcrun swiftc -target "$arch-apple-macos13.0" -sdk "$SDK" -framework AppKit \
     "$SCRIPT_DIR/Glove80Flasher.swift" "$SCRIPT_DIR/ChargeGuardSettings.swift" "$SCRIPT_DIR/ZMKConfigImporter.swift" \
