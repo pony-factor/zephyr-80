@@ -4,7 +4,7 @@ macOS tools for flashing Glove80 firmware, reading battery levels, and optionall
 
 Build the app with `./macOS/build-app.sh`, then open `macOS/Glove80 Flasher.app` from this checkout. The build needs Xcode command line tools. The app uses a neutral keyboard icon and generic bootloader instructions; follow the bindings in your own firmware.
 
-Place a matching firmware pair in `firmware/` as `glove80_lh-zmk.uf2` and `glove80_rh-zmk.uf2`. Connect each half by USB and enter its bootloader. The app detects `GLV80LHBOOT` or `GLV80RHBOOT` and copies the matching file. The Pull Repo button runs `git pull --ff-only` only when clicked and preserves any selected firmware folder. The app does not poll for cloud firmware builds; build your imported configuration locally, then select its output with **Use Firmware…**. Locally supplied UF2 files are ignored by Git. The app bundles a separate fixed factory recovery pair.
+Place a matching firmware pair in `firmware/` as `glove80_lh-zmk.uf2` and `glove80_rh-zmk.uf2`. Connect each half by USB and enter its bootloader. The app detects `GLV80LHBOOT` or `GLV80RHBOOT` and copies the matching file. The Pull Repo button runs `git pull --ff-only` only when clicked and preserves any selected firmware folder. The app does not poll for cloud firmware builds; build your imported configuration locally, then select its output with **Use Firmware...**. Locally supplied UF2 files are ignored by Git. The app bundles a separate fixed factory recovery pair.
 
 ## Bring your own configuration
 
