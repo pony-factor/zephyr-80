@@ -41,8 +41,9 @@ final class FlasherController: NSObject, NSApplicationDelegate {
     }
 
     private enum BuildReadiness {
-        case ready(sourceCommit: String)
-        case pending(sourceCommit: String)
+        case ready(sourceCommit: String?)
+        case missing
+        case mismatch(sourceCommit: String)
         case failed(sourceCommit: String, runURL: String?)
         case unavailable(sourceCommit: String?)
     }
@@ -61,7 +62,6 @@ final class FlasherController: NSObject, NSApplicationDelegate {
     private var chargeGuardButton: NSButton!
     private var chargeGuardSettingsController: ChargeGuardSettingsController?
     private var timer: Timer?
-    private var buildRetryTimer: Timer?
     private var repoRoot: URL?
     private var activeFirmwareRoot: URL?
     private var firmwareReady = false
@@ -122,7 +122,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
 
         let title = label("Glove80 Flasher", size: 26, weight: .bold)
 
-        commitLabel = label("Checking repository and firmware build…", size: 11, weight: .regular)
+        commitLabel = label("Checking repository and local firmware…", size: 11, weight: .regular)
         commitLabel.textColor = .secondaryLabelColor
         configureWrapping(commitLabel, maxWidth: 640)
         NSLayoutConstraint.activate([
@@ -503,35 +503,24 @@ final class FlasherController: NSObject, NSApplicationDelegate {
     }
 
     private func buildReadiness(in root: URL) -> BuildReadiness {
+        guard firmwareExists(in: root) else { return .missing }
         let sourceCommit = latestSourceCommit(in: root)
-        let status = readBuildStatus(in: root)
-
-        if let sourceCommit, let status {
-            if status.sourceCommit == sourceCommit {
-                if status.status == "success", firmwareExists(in: root) {
-                    return .ready(sourceCommit: sourceCommit)
-                }
-                if status.status == "failed" {
-                    return .failed(sourceCommit: sourceCommit, runURL: status.runURL)
-                }
-                return .unavailable(sourceCommit: sourceCommit)
-            }
-
-            return .pending(sourceCommit: sourceCommit)
+        let statusURL = root.appendingPathComponent("firmware/build-status.json")
+        // Locally built pairs do not need cloud-build metadata.
+        guard fileManager.fileExists(atPath: statusURL.path) else {
+            return .ready(sourceCommit: nil)
         }
-
-        // A host-tools checkout can flash a firmware pair supplied by the user.
-        // Repositories with a firmware build retain source/status matching above.
-        if let sourceCommit, !fileManager.fileExists(atPath: root.appendingPathComponent("config/west.yml").path),
-           firmwareExists(in: root) {
-            return .ready(sourceCommit: sourceCommit)
+        guard let sourceCommit, let status = readBuildStatus(in: root) else {
+            return .unavailable(sourceCommit: sourceCommit)
         }
-
-        if let sourceCommit {
-            return .pending(sourceCommit: sourceCommit)
+        guard status.sourceCommit == sourceCommit else {
+            return .mismatch(sourceCommit: sourceCommit)
         }
-
-        return .unavailable(sourceCommit: nil)
+        if status.status == "success" { return .ready(sourceCommit: sourceCommit) }
+        if status.status == "failed" {
+            return .failed(sourceCommit: sourceCommit, runURL: status.runURL)
+        }
+        return .unavailable(sourceCommit: sourceCommit)
     }
 
     private func shortHash(_ hash: String) -> String {
@@ -546,28 +535,38 @@ final class FlasherController: NSObject, NSApplicationDelegate {
         switch buildReadiness(in: root) {
         case .ready(let sourceCommit):
             firmwareReady = true
-            stopBuildRetrying()
             commitLabel.textColor = .secondaryLabelColor
-            commitLabel.stringValue = "\(commitDescription)\nPrebuilt firmware ✓  •  source \(shortHash(sourceCommit))"
+            let firmwareDescription = sourceCommit.map { "Firmware ✓  •  source \(shortHash($0))" }
+                ?? "Local firmware pair ready"
+            commitLabel.stringValue = "\(commitDescription)\n\(firmwareDescription)"
 
             if resetFlashCycleIfReady {
                 resetFlashCycle()
             }
 
             statusLabel.textColor = .labelColor
-            statusLabel.stringValue = "✓ Firmware build is complete. Step 1: connect the left half by USB and enter bootloader mode."
+            statusLabel.stringValue = "✓ Firmware ready. Step 1: connect the left half by USB and enter bootloader mode."
             startMonitoring()
 
-        case .pending(let sourceCommit):
+        case .missing:
+            firmwareReady = false
+            stopMonitoring()
+            commitLabel.textColor = .secondaryLabelColor
+            commitLabel.stringValue = "\(commitDescription)\nNo local firmware selected"
+            update(.left, text: "Select firmware", color: .secondaryLabelColor)
+            update(.right, text: "Select firmware", color: .secondaryLabelColor)
+            statusLabel.textColor = .labelColor
+            statusLabel.stringValue = "Import ZMK… to prepare your configuration, build it locally, then choose Use Firmware… to select the output folder."
+
+        case .mismatch(let sourceCommit):
             firmwareReady = false
             stopMonitoring()
             commitLabel.textColor = .systemOrange
-            commitLabel.stringValue = "\(commitDescription)\nSource \(shortHash(sourceCommit)) is waiting for its firmware build"
-            update(.left, text: "Build pending", color: .systemOrange)
-            update(.right, text: "Build pending", color: .systemOrange)
+            commitLabel.stringValue = "\(commitDescription)\nFirmware metadata does not match source \(shortHash(sourceCommit))"
+            update(.left, text: "Metadata mismatch", color: .systemOrange)
+            update(.right, text: "Metadata mismatch", color: .systemOrange)
             statusLabel.textColor = .systemOrange
-            statusLabel.stringValue = "Firmware is still building. Checking automatically every 15 seconds…"
-            startBuildRetrying()
+            statusLabel.stringValue = "The repository firmware is from another source revision. Build your configuration locally, then select its output with Use Firmware…."
 
         case .failed(let sourceCommit, _):
             firmwareReady = false
@@ -577,8 +576,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
             update(.left, text: "Build failed", color: .systemRed)
             update(.right, text: "Build failed", color: .systemRed)
             statusLabel.textColor = .systemRed
-            statusLabel.stringValue = "Firmware build failed. Fix or rerun the GitHub Actions build; checking will continue automatically."
-            startBuildRetrying()
+            statusLabel.stringValue = "The repository firmware metadata records a failed build. Build your configuration locally, then select its output with Use Firmware…."
 
         case .unavailable(let sourceCommit):
             firmwareReady = false
@@ -592,8 +590,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
             update(.left, text: "Not ready", color: .systemOrange)
             update(.right, text: "Not ready", color: .systemOrange)
             statusLabel.textColor = .systemOrange
-            statusLabel.stringValue = "Firmware build status is unavailable. Checking automatically every 15 seconds…"
-            startBuildRetrying()
+            statusLabel.stringValue = "The repository firmware metadata cannot be verified. Select a matching locally built pair with Use Firmware…."
         }
     }
 
@@ -645,7 +642,6 @@ final class FlasherController: NSObject, NSApplicationDelegate {
             alert.runModal()
             return
         }
-        stopBuildRetrying()
         activeFirmwareRoot = folder
         firmwareReady = true
         resetFlashCycle()
@@ -673,7 +669,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
     }
 
     @objc private func pullRepo() {
-        performPull(automatic: false)
+        performPull()
     }
 
     @objc private func restorePreviousFirmware() {
@@ -693,7 +689,6 @@ final class FlasherController: NSObject, NSApplicationDelegate {
 
         activeFirmwareRoot = firmwareRoot
         firmwareReady = true
-        stopBuildRetrying()
         resetFlashCycle()
         commitLabel.textColor = .systemGreen
         commitLabel.stringValue = "Recovery firmware selected\nPrevious successful GitHub Actions build \(shortHash(commit)) ✓"
@@ -725,7 +720,6 @@ final class FlasherController: NSObject, NSApplicationDelegate {
 
         activeFirmwareRoot = factoryRoot
         firmwareReady = true
-        stopBuildRetrying()
         resetFlashCycle()
         commitLabel.textColor = .systemGreen
         commitLabel.stringValue = "Factory recovery selected\nStatic MoErgo factory firmware ✓"
@@ -738,7 +732,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
         startMonitoring()
     }
 
-    private func performPull(automatic: Bool) {
+    private func performPull() {
         guard let repoRoot else {
             statusLabel.stringValue = "Could not find the glove80-mac checkout."
             statusLabel.textColor = .systemRed
@@ -746,7 +740,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
         }
 
         guard flashing.isEmpty else {
-            statusLabel.stringValue = "Wait for the current flash to finish before pulling new firmware."
+            statusLabel.stringValue = "Wait for the current flash to finish before pulling repository changes."
             statusLabel.textColor = .systemOrange
             return
         }
@@ -758,7 +752,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
         pullInProgress = true
         pullButton.isEnabled = false
         statusLabel.textColor = .labelColor
-        statusLabel.stringValue = automatic ? "Checking for completed firmware…" : "Pulling latest repo changes…"
+        statusLabel.stringValue = "Pulling latest repo changes…"
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
@@ -785,47 +779,27 @@ final class FlasherController: NSObject, NSApplicationDelegate {
                     if process.terminationStatus == 0 {
                         let newHead = self.runGit(["rev-parse", "HEAD"], in: repoRoot)
                         let repoChanged = previousHead != newHead
-                        let wasRestoring = self.activeFirmwareRoot != nil
-                        self.activeFirmwareRoot = nil
-                        self.restoreButton.title = "Restore Previous Firmware"
-                        self.restoreButton.isEnabled = true
-                        self.factoryButton.title = "Restore Factory Firmware"
-                        self.factoryButton.isEnabled = true
-                        self.refreshRepositoryState(
-                            in: repoRoot,
-                            resetFlashCycleIfReady: repoChanged || wasRestoring
-                        )
+                        if self.activeFirmwareRoot != nil {
+                            self.statusLabel.textColor = .labelColor
+                            self.statusLabel.stringValue = "Repository updated. Selected firmware preserved; connect a half in bootloader mode to flash."
+                        } else {
+                            self.refreshRepositoryState(in: repoRoot, resetFlashCycleIfReady: repoChanged)
+                        }
                     } else {
-                        self.statusLabel.textColor = automatic ? .systemOrange : .systemRed
+                        self.statusLabel.textColor = .systemRed
                         let lastLine = output.split(separator: "\n").last.map(String.init) ?? "git pull failed"
-                        self.statusLabel.stringValue = automatic
-                            ? "Automatic check failed; trying again in 15 seconds."
-                            : "Pull failed: \(lastLine)"
+                        self.statusLabel.stringValue = "Pull failed: \(lastLine)"
                     }
                 }
             } catch {
                 DispatchQueue.main.async {
                     self.pullInProgress = false
                     self.pullButton.isEnabled = true
-                    self.statusLabel.textColor = automatic ? .systemOrange : .systemRed
-                    self.statusLabel.stringValue = automatic
-                        ? "Automatic check failed; trying again in 15 seconds."
-                        : "Pull failed: \(error.localizedDescription)"
+                    self.statusLabel.textColor = .systemRed
+                    self.statusLabel.stringValue = "Pull failed: \(error.localizedDescription)"
                 }
             }
         }
-    }
-
-    private func startBuildRetrying() {
-        buildRetryTimer?.invalidate()
-        buildRetryTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
-            self?.performPull(automatic: true)
-        }
-    }
-
-    private func stopBuildRetrying() {
-        buildRetryTimer?.invalidate()
-        buildRetryTimer = nil
     }
 
     private func resetFlashCycle() {
