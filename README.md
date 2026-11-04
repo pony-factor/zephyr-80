@@ -53,17 +53,17 @@ Each import creates a separate `user-config/<import-ID>/config/` directory ignor
 
 ### Build and flash
 
-Import checks file selection and keymap names, then automatically starts a local build of both firmware halves. The app stays responsive while dependencies download and compilation runs. The build requires an installed `west` command and a compatible Zephyr SDK/toolchain. The app searches its inherited PATH plus standard Homebrew and `~/.local/bin` locations for build tools.
+Import checks file selection and keymap names, then automatically starts a local build of both firmware halves. The app stays responsive while dependencies download and compilation runs. The app checks for `west`, CMake, Ninja, and a Zephyr 3.5-compatible ARM toolchain (SDK 0.16.x) before building. If dependencies are missing, **Install & Build** requests explicit permission to install `west`, CMake, and Ninja in `~/Library/Application Support/Glove80 Mac/Tools/venv/`, and a verified Zephyr SDK 0.16.8 ARM toolchain under the same Tools directory. Existing compatible toolchains are reused. Downloads come from PyPI and the official Zephyr SDK release and are never started without confirmation. The SDK archive is checked against the published SHA-256 manifest. Other Zephyr revisions require a matching SDK installed manually; the app does not guess a version.
 
-When both halves finish, choose **Use Firmware** to prepare flashing, or **Later** to keep the output for another time. A failed build preserves the imported configuration and offers **Show Build Log** when a log is available at `user-config/<import-ID>/build.log`. Resolve missing tools or compiler errors before flashing.
+When both halves finish, choose **Use Firmware** to prepare flashing, or **Later** to keep the output for another time. A failed build preserves the imported configuration and offers **Retry Build**, **Show Build Log**, or **Later**. Use **Resume Build…** to choose any existing `user-config/<import-ID>/` folder and repeat the tool check and build without importing or modifying the source again. Logs are written to `user-config/<import-ID>/build.log`. Any unfinished download or unsupported SDK revision produces an actionable error without discarding the import.
 
 To rerun a saved import from this repository's root:
 
 ```sh
-./scripts/build-user-config.sh <import-ID>
+./scripts/build-user-config.sh <import-ID> [--install-tools]
 ```
 
-Replace `<import-ID>` with the directory name under `user-config/`.
+Replace `<import-ID>` with the directory name under `user-config/`. The optional `--install-tools` flag explicitly authorizes dependency downloads; leave it off to use only existing dependencies.
 
 The builder applies the shared RGB patches automatically for the bundled pinned firmware revisions, as described below. Your imported `.patch` files are retained as source only and are not applied automatically. If your configuration needs them, prepare a manual build workspace, apply the shared RGB patches first and your patches afterward, then compile. The local build commands below show the manual workflow.
 

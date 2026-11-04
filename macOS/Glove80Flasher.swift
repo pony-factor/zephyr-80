@@ -56,6 +56,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
     private var rightStatus: NSTextField!
     private var pullButton: NSButton!
     private var importButton: NSButton!
+    private var resumeButton: NSButton!
     private var useFirmwareButton: NSButton!
     private var restoreButton: NSButton!
     private var factoryButton: NSButton!
@@ -86,6 +87,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
         guard let repoRoot else {
             pullButton.isEnabled = false
             importButton.isEnabled = false
+            resumeButton.isEnabled = false
             restoreButton.isEnabled = false
             factoryButton.isEnabled = false
             chargeGuardButton.isEnabled = false
@@ -104,7 +106,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
 
     private func buildWindow() {
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 560),
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -147,9 +149,11 @@ final class FlasherController: NSObject, NSApplicationDelegate {
 
         importButton = NSButton(title: "Import ZMK…", target: self, action: #selector(importZMKConfiguration))
         importButton.bezelStyle = .rounded
+        resumeButton = NSButton(title: "Resume Build…", target: self, action: #selector(resumeSavedBuild))
+        resumeButton.bezelStyle = .rounded
         useFirmwareButton = NSButton(title: "Use Firmware…", target: self, action: #selector(useFirmwareFolder))
         useFirmwareButton.bezelStyle = .rounded
-        let topButtons = NSStackView(views: [pullButton, importButton, useFirmwareButton, chargeGuardButton])
+        let topButtons = NSStackView(views: [pullButton, importButton, resumeButton, useFirmwareButton, chargeGuardButton])
         topButtons.orientation = .horizontal
         topButtons.alignment = .centerY
         topButtons.spacing = 10
@@ -665,7 +669,7 @@ final class FlasherController: NSObject, NSApplicationDelegate {
         do {
             let imported = try ZMKConfigImporter().importConfiguration(from: selection, into: repoRoot,
                 profile: profile.indexOfSelectedItem == 1 ? .communityRGB : .stock)
-            buildImportedConfiguration(imported, in: repoRoot)
+            offerBuild(imported, in: repoRoot)
         } catch {
             let alert = NSAlert()
             alert.messageText = "Could not import configuration"
@@ -674,11 +678,87 @@ final class FlasherController: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func buildImportedConfiguration(_ imported: ZMKConfigImporter.ImportedConfiguration, in root: URL) {
+    @objc private func resumeSavedBuild() {
+        guard let repoRoot, !buildInProgress, !pullInProgress, flashing.isEmpty else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Resume an imported ZMK configuration"
+        panel.prompt = "Resume Build"
+        panel.message = "Choose the import-ID folder in user-config. The saved configuration will not be imported again."
+        panel.directoryURL = repoRoot.appendingPathComponent("user-config", isDirectory: true)
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        do {
+            let imported = try ZMKConfigImporter().savedConfiguration(at: folder, in: repoRoot)
+            offerBuild(imported, in: repoRoot)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Could not resume saved import"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    private func buildEnvironment() -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        let tools = NSHomeDirectory() + "/Library/Application Support/Glove80 Mac/Tools/venv/bin"
+        let paths = [tools] + (environment["PATH"] ?? "").split(separator: ":").map(String.init)
+            + ["/opt/homebrew/bin", "/usr/local/bin", NSHomeDirectory() + "/.local/bin",
+               "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        environment["PATH"] = paths.joined(separator: ":")
+        return environment
+    }
+
+    private func offerBuild(_ imported: ZMKConfigImporter.ImportedConfiguration, in root: URL) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["python3", root.appendingPathComponent("scripts/zephyr_tools.py").path,
+                             "status", imported.directory.path]
+        process.environment = buildEnvironment()
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0,
+                  let result = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw NSError(domain: "LocalFirmwareBuild", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "Could not inspect build dependencies. Verify python3 is available. Your import is saved at \(imported.configDirectory.path)."
+                ])
+            }
+            if result["ready"] as? Bool == true {
+                buildImportedConfiguration(imported, in: root, installTools: false)
+                return
+            }
+            let missing = (result["missing"] as? [String] ?? ["build tools"]).joined(separator: ", ")
+            let alert = NSAlert()
+            alert.messageText = "Install missing build tools?"
+            alert.informativeText = "Missing: \(missing).\n\nInstall west, CMake, and Ninja in a private Glove80 environment and a compatible Zephyr ARM SDK if needed. This downloads software from PyPI and the official Zephyr SDK release. Your imported configuration stays saved."
+            alert.addButton(withTitle: "Install & Build")
+            alert.addButton(withTitle: "Later")
+            if alert.runModal() == .alertFirstButtonReturn {
+                buildImportedConfiguration(imported, in: root, installTools: true)
+            } else {
+                commitLabel.stringValue = "Saved import: \(imported.directory.lastPathComponent)"
+                statusLabel.textColor = .secondaryLabelColor
+                statusLabel.stringValue = "Import saved. Choose Resume Build… when ready."
+            }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Could not check build tools"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    private func buildImportedConfiguration(_ imported: ZMKConfigImporter.ImportedConfiguration, in root: URL, installTools: Bool) {
         buildInProgress = true
         firmwareReady = false
         stopMonitoring()
-        for button in [importButton, useFirmwareButton, pullButton, restoreButton, factoryButton] {
+        for button in [importButton, resumeButton, useFirmwareButton, pullButton, restoreButton, factoryButton] {
             button?.isEnabled = false
         }
         commitLabel.textColor = .secondaryLabelColor
@@ -686,23 +766,13 @@ final class FlasherController: NSObject, NSApplicationDelegate {
         update(.left, text: "Building", color: .secondaryLabelColor)
         update(.right, text: "Building", color: .secondaryLabelColor)
         statusLabel.textColor = .labelColor
-        statusLabel.stringValue = "Building both firmware halves locally. The first build downloads firmware dependencies and may take several minutes."
+        statusLabel.stringValue = installTools ? "Installing missing tools, then building both firmware halves…" : "Building both firmware halves locally…"
 
         let logURL = imported.directory.appendingPathComponent("build.log")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var failure: String?
             do {
-                var environment = ProcessInfo.processInfo.environment
-                let paths = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
-                    + ["/opt/homebrew/bin", "/usr/local/bin", NSHomeDirectory() + "/.local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
-                environment["PATH"] = paths.joined(separator: ":")
-                guard paths.contains(where: {
-                    FileManager.default.isExecutableFile(atPath: URL(fileURLWithPath: $0).appendingPathComponent("west").path)
-                }) else {
-                    throw NSError(domain: "LocalFirmwareBuild", code: 1, userInfo: [
-                        NSLocalizedDescriptionKey: "Install west and a compatible Zephyr SDK/toolchain, then import the configuration again. Your imported files are saved in \(imported.configDirectory.path)."
-                    ])
-                }
+                let environment = self?.buildEnvironment() ?? ProcessInfo.processInfo.environment
                 guard FileManager.default.createFile(atPath: logURL.path, contents: nil) else {
                     throw NSError(domain: "LocalFirmwareBuild", code: 2, userInfo: [NSLocalizedDescriptionKey: "Could not create the local build log."])
                 }
@@ -710,7 +780,8 @@ final class FlasherController: NSObject, NSApplicationDelegate {
                 defer { try? log.close() }
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/bin/bash")
-                process.arguments = [root.appendingPathComponent("scripts/build-user-config.sh").path, imported.directory.lastPathComponent]
+                process.arguments = [root.appendingPathComponent("scripts/build-user-config.sh").path,
+                                     imported.directory.lastPathComponent] + (installTools ? ["--install-tools"] : [])
                 process.currentDirectoryURL = root
                 process.environment = environment
                 process.standardOutput = log
@@ -727,23 +798,26 @@ final class FlasherController: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.buildInProgress = false
-                for button in [self.importButton, self.useFirmwareButton, self.pullButton, self.restoreButton, self.factoryButton] {
+                for button in [self.importButton, self.resumeButton, self.useFirmwareButton, self.pullButton, self.restoreButton, self.factoryButton] {
                     button?.isEnabled = true
                 }
                 let firmware = imported.directory.appendingPathComponent("firmware")
                 let alert = NSAlert()
                 if let message = buildFailure ?? (self.firmwarePairExists(in: firmware) ? nil : "The build did not produce both firmware halves.") {
                     self.statusLabel.textColor = .systemRed
-                    self.statusLabel.stringValue = "Local build failed. Your configuration is saved; resolve the build error and import again, or build it from Terminal."
+                    self.statusLabel.stringValue = "Local build failed. Your configuration is saved; use Resume Build… to retry."
                     self.update(.left, text: "Build failed", color: .systemRed)
                     self.update(.right, text: "Build failed", color: .systemRed)
                     alert.messageText = "Could not build firmware"
                     alert.informativeText = message
-                    alert.addButton(withTitle: "OK")
-                    if self.fileManager.fileExists(atPath: logURL.path) {
-                        alert.addButton(withTitle: "Show Build Log")
-                    }
-                    if alert.runModal() == .alertSecondButtonReturn {
+                    alert.addButton(withTitle: "Retry Build")
+                    alert.addButton(withTitle: "Show Build Log")
+                    alert.addButton(withTitle: "Later")
+                    let response = alert.runModal()
+                    if response == .alertFirstButtonReturn {
+                        self.offerBuild(imported, in: root)
+                    } else if response == .alertSecondButtonReturn,
+                              self.fileManager.fileExists(atPath: logURL.path) {
                         NSWorkspace.shared.activateFileViewerSelecting([logURL])
                     }
                 } else {

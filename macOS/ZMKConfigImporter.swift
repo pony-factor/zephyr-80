@@ -23,6 +23,29 @@ struct ZMKConfigImporter {
         }
     }
 
+    // Validate and reuse an earlier import without copying or modifying its source.
+    func savedConfiguration(at selected: URL, in repository: URL) throws -> ImportedConfiguration {
+        let storage = repository.appendingPathComponent("user-config", isDirectory: true)
+            .resolvingSymlinksInPath().standardizedFileURL
+        let directory = selected.standardizedFileURL
+        guard UUID(uuidString: directory.lastPathComponent) != nil,
+              directory.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL == storage,
+              let values = try? directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+              values.isDirectory == true, values.isSymbolicLink != true else {
+            throw ImportError.invalidSelection
+        }
+        let config = directory.appendingPathComponent("config", isDirectory: true)
+        guard let configValues = try? config.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+              configValues.isDirectory == true, configValues.isSymbolicLink != true,
+              manager.fileExists(atPath: config.appendingPathComponent("west.yml").path),
+              (manager.fileExists(atPath: config.appendingPathComponent("glove80.keymap").path) ||
+               (manager.fileExists(atPath: config.appendingPathComponent("glove80_lh.keymap").path) &&
+                manager.fileExists(atPath: config.appendingPathComponent("glove80_rh.keymap").path))) else {
+            throw ImportError.missingKeymap
+        }
+        return ImportedConfiguration(directory: directory)
+    }
+
     private let manager = FileManager.default
     private let ignoredDirectories: Set<String> = ["build", "node_modules", "zephyr", "zmk", "user-config"]
     private let sourceExtensions: Set<String> = ["keymap", "conf", "dtsi", "dts", "overlay", "c", "h", "yaml", "yml", "patch"]
