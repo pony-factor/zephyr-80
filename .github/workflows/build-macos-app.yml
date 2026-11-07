@@ -2,7 +2,7 @@ name: Build Glove80 Mac
 on:
   push:
     branches: [main, community-rgb]
-    paths: ['macOS/**', 'firmware/factory/**', 'scripts/build-user-config.sh', 'tests/test_zmk_config_importer.swift', '.github/workflows/build-macos-app.yml']
+    paths: ['macOS/**', 'firmware/factory/**', 'scripts/build-user-config.sh', 'scripts/zephyr_tools.py', 'tests/test_zephyr_tools.py', 'tests/test_zmk_config_importer.swift', '.github/workflows/build-macos-app.yml']
   pull_request:
     paths: ['macOS/**', 'firmware/factory/**', 'scripts/build-user-config.sh', 'tests/test_zmk_config_importer.swift', '.github/workflows/build-macos-app.yml']
   workflow_dispatch:
@@ -22,6 +22,7 @@ jobs:
           xcrun swiftc macOS/ZMKConfigImporter.swift tests/test_zmk_config_importer.swift -o /tmp/ImportTests
           /tmp/ImportTests
           bash -n scripts/build-user-config.sh
+          python3 -m unittest discover -s tests -p 'test_zephyr_tools.py' -v
       - name: Package app
         run: ditto -c -k --keepParent 'macOS/Glove80 Flasher.app' Glove80-Flasher.zip
       - uses: actions/upload-artifact@v4

@@ -65,6 +65,15 @@ struct ImporterTests {
             _ = try importer.importConfiguration(from: linked, into: repo, profile: .stock)
             fatalError("Expected symlink rejection")
         } catch ZMKConfigImporter.ImportError.symbolicLink {}
+        let saved = try importer.savedConfiguration(at: single.directory, in: repo)
+        assert(saved.configDirectory == single.configDirectory)
+        do {
+            _ = try importer.savedConfiguration(at: source, in: repo)
+            fatalError("Expected saved folder outside user-config to be rejected")
+        } catch ZMKConfigImporter.ImportError.invalidSelection {}
+        let changed = single.configDirectory.appendingPathComponent("glove80.keymap")
+        let unchanged = try String(contentsOf: changed, encoding: .utf8)
+        assert(unchanged == "user keymap")
         print("Import tests passed: preservation, defaults, source files, exclusions, isolation, failure cleanup, and symlink rejection")
     }
 }

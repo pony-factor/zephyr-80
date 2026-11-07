@@ -4,7 +4,7 @@ macOS tools for flashing Glove80 firmware, reading battery levels, and optionall
 
 Build the app with `./macOS/build-app.sh`, then open `macOS/Glove80 Flasher.app` from this checkout. The build needs Xcode command line tools. The app uses a neutral keyboard icon and generic bootloader instructions; follow the bindings in your own firmware.
 
-Place a matching firmware pair in `firmware/` as `glove80_lh-zmk.uf2` and `glove80_rh-zmk.uf2`. Connect each half by USB and enter its bootloader. The app detects `GLV80LHBOOT` or `GLV80RHBOOT` and copies the matching file. The Pull Repo button runs `git pull --ff-only`. Locally supplied UF2 files are ignored by Git. The app bundles a separate fixed factory recovery pair.
+Place a matching firmware pair in `firmware/` as `glove80_lh-zmk.uf2` and `glove80_rh-zmk.uf2`. Connect each half by USB and enter its bootloader. The app detects `GLV80LHBOOT` or `GLV80RHBOOT` and copies the matching file. The Pull Repo button runs `git pull --ff-only` only when clicked and preserves any selected firmware folder. The app does not poll for cloud firmware builds; build your imported configuration locally, then select its output with **Use Firmware...**. Locally supplied UF2 files are ignored by Git. The app bundles a separate fixed factory recovery pair.
 
 ## Bring your own configuration
 
@@ -53,13 +53,17 @@ Each import creates a separate `user-config/<import-ID>/config/` directory ignor
 
 ### Build and flash
 
-Import checks file selection and keymap names; it does not validate ZMK syntax or firmware compatibility. After import, run the command shown by the app from this repository's root:
+Import checks file selection and keymap names, then automatically starts a local build of both firmware halves. The app stays responsive while dependencies download and compilation runs. The app checks for `west`, CMake, Ninja, and a Zephyr 3.5-compatible ARM toolchain (SDK 0.16.x) before building. If dependencies are missing, **Install & Build** requests explicit permission to install `west`, CMake, and Ninja in `~/Library/Application Support/Glove80 Mac/Tools/venv/`, and a verified Zephyr SDK 0.16.8 ARM toolchain under the same Tools directory. Existing compatible toolchains are reused. Downloads come from PyPI and the official Zephyr SDK release and are never started without confirmation. The SDK archive is checked against the published SHA-256 manifest. Other Zephyr revisions require a matching SDK installed manually; the app does not guess a version.
+
+When both halves finish, choose **Use Firmware** to prepare flashing, or **Later** to keep the output for another time. A failed build preserves the imported configuration and offers **Retry Build**, **Show Build Log**, or **Later**. Use **Resume Build…** to choose any existing `user-config/<import-ID>/` folder and repeat the tool check and build without importing or modifying the source again. Logs are written to `user-config/<import-ID>/build.log`. Any unfinished download or unsupported SDK revision produces an actionable error without discarding the import.
+
+To rerun a saved import from this repository's root:
 
 ```sh
-./scripts/build-user-config.sh <import-ID>
+./scripts/build-user-config.sh <import-ID> [--install-tools]
 ```
 
-Replace `<import-ID>` with the generated ID shown by the app. The build requires an installed `west` command and a compatible Zephyr SDK/toolchain, fetches the imported manifest's dependencies, and compiles both halves. Importing alone does not build or flash anything. Resolve compiler errors before flashing.
+Replace `<import-ID>` with the directory name under `user-config/`. The optional `--install-tools` flag explicitly authorizes dependency downloads; leave it off to use only existing dependencies.
 
 The builder applies the shared RGB patches automatically for the bundled pinned firmware revisions, as described below. Your imported `.patch` files are retained as source only and are not applied automatically. If your configuration needs them, prepare a manual build workspace, apply the shared RGB patches first and your patches afterward, then compile. The local build commands below show the manual workflow.
 
